@@ -39,7 +39,7 @@ def getEOXByDates():
         help='Start date (MM/DD/YYYY)')
     parser.add_option('-e', '--end', dest='end',
         help='End date (MM/DD/YYYY)')
-    (options, args) = parser.parse_args()
+    options = parser.parse_args()[0]
 
     if not options.username:
         usage("You must specify your EOX username.")

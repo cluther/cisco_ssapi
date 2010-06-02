@@ -22,11 +22,11 @@ log = logging.getLogger('cisco_ssapi.eox')
 
 import re
 import socket
-import sys
 import threading
 from httplib import HTTPSConnection
 from optparse import OptionParser
 from xml.dom.minidom import parseString
+from xml.parsers.expat import ExpatError
 
 
 EOX_SERVER = "wsgx.cisco.com"
@@ -203,7 +203,7 @@ class Server(object):
             </ns:%s>
             """ % (method, body, method)
 
-        ns, xml = self.soapCall(action, method, body, bulk=False)
+        ns, xml = self.soapCall(action, body, bulk=False)
 
         count = 0
         for eoxRecord in xml.getElementsByTagName('%s:EOXRecord' % ns):
@@ -224,7 +224,7 @@ class Server(object):
             </ns:%s>
             """ % (method, body, page, method)
 
-        ns, xml = self.soapCall(action, method, local_body, bulk=True)
+        ns, xml = self.soapCall(action, local_body, bulk=True)
         lastIndex = int(xml.getElementsByTagName(
             '%s:LastIndex' % ns)[0].childNodes[0].data)
 
@@ -251,46 +251,45 @@ class Server(object):
                     thread.start()
 
 
-    def soapCall(self, action, method, body, bulk=False):
+    def soapCall(self, action, body, bulk=False):
         headers = self._headers
         headers.update({'SOAPAction': action})
         body = SOAP_TEMPLATE % body
 
-        error_text = 'An unknown error occurred'
-        for i in range(10):
-            xml_string = None
-            xml = None
+        xml_string = None
+        xml = None
 
-            # Handle up to 10 timeouts.
+        # Handle up to 10 timeouts.
+        for _i in range(10):
             try:
                 conn = HTTPSConnection(EOX_SERVER, 443)
                 conn.request(
                     "POST", bulk and EOX_URL_BULK or EOX_URL, body, headers)
                 response = conn.getresponse()
                 xml_string = response.read()
+                break
             except socket.timeout:
-                error_text = 'Timeout on Cisco SSAPI server'
-                continue
+                pass
+        else:
+            raise EOXException("Timeout on Cisco SSAPI server")
 
-            # Handle bad XML coming back.
-            try:
-                xml = parseString(xml_string)
-            except ExpatError, ex:
-                error_text = str(ex)
-                break
+        # Handle bad XML coming back.
+        try:
+            xml = parseString(xml_string)
+        except ExpatError, ex:
+            raise EOXException(ex)
 
-            # Handle generic SOAP errors.
-            error_details = xml.getElementsByTagName('det:detailmessage')
-            if error_details:
-                error_text = error_details[0].childNodes[0].data
-                break
+        # Handle generic SOAP errors.
+        error_details = xml.getElementsByTagName('det:detailmessage')
+        if error_details:
+            raise EOXException(error_details[0].childNodes[0].data)
 
-            # The XMLNS keeps changing. Figure it out dynamically.
-            match = re.search(r' xmlns:(axis[^=]+)', xml_string)
-            if match:
-                return (match.group(1), xml)
-
-        raise EOXException(error_text)
+        # The XMLNS keeps changing. Figure it out dynamically.
+        match = re.search(r' xmlns:(axis[^=]+)', xml_string)
+        if match:
+            return (match.group(1), xml)
+        else:
+            raise EOXException("No axis xmlns in response")
 
 
 class PagingThread(threading.Thread):
@@ -300,6 +299,8 @@ class PagingThread(threading.Thread):
         self._method = method
         self._body = body
         self._page = page
+        self._ns = None
+        self._xml = None
         threading.Thread.__init__(self)
 
     def run(self):
