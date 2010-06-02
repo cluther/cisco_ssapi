@@ -46,6 +46,10 @@ SOAP_TEMPLATE = """
 """
 
 
+class EOXException(Exception):
+    pass
+
+
 def chunkList(original, size=EOX_GROUP_LIMIT):
     """
     Conveinence method for breaking a long list into a list of lists that won't
@@ -252,8 +256,12 @@ class Server(object):
         headers.update({'SOAPAction': action})
         body = SOAP_TEMPLATE % body
 
-        xml_string = None
+        error_text = 'An unknown error occurred'
         for i in range(10):
+            xml_string = None
+            xml = None
+
+            # Handle up to 10 timeouts.
             try:
                 conn = HTTPSConnection(EOX_SERVER, 443)
                 conn.request(
@@ -261,14 +269,28 @@ class Server(object):
                 response = conn.getresponse()
                 xml_string = response.read()
             except socket.timeout:
+                error_text = 'Timeout on Cisco SSAPI server'
                 continue
+
+            # Handle bad XML coming back.
+            try:
+                xml = parseString(xml_string)
+            except ExpatError, ex:
+                error_text = str(ex)
+                break
+
+            # Handle generic SOAP errors.
+            error_details = xml.getElementsByTagName('det:detailmessage')
+            if error_details:
+                error_text = error_details[0].childNodes[0].data
+                break
 
             # The XMLNS keeps changing. Figure it out dynamically.
             match = re.search(r' xmlns:(axis[^=]+)', xml_string)
             if match:
-                return (match.group(1), parseString(xml_string))
+                return (match.group(1), xml)
 
-        raise Exception("Persistent EOX Server Errors")
+        raise EOXException(error_text)
 
 
 class PagingThread(threading.Thread):

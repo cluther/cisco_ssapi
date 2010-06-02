@@ -17,10 +17,14 @@
 #
 ##############################################################################
 
+import logging
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger()
+
 import csv
 import sys
 
-from cisco_ssapi.eox import getOptionParser, Server, EOXRecord
+from cisco_ssapi.eox import getOptionParser, Server, EOXException, EOXRecord
 
 
 def getEOXByDates():
@@ -54,14 +58,19 @@ def getEOXByDates():
 
     server = Server(options.username, options.password, options.threads)
 
-    records = server.getEOXByDates(startDate=options.start, endDate=options.end)
+    try:
+        records = server.getEOXByDates(
+            startDate=options.start, endDate=options.end)
 
-    for record in records:
-        row = []
-        for propertyName in EOXRecord.propertyNames:
-            row.append(getattr(record, propertyName, ''))
+        for record in records:
+            row = []
+            for propertyName in EOXRecord.propertyNames:
+                row.append(getattr(record, propertyName, ''))
 
-        writer.writerow(row)
+            writer.writerow(row)
+
+    except EOXException, ex:
+        log.error(ex)
 
 
 def getEOXBySerialNumber():
@@ -86,20 +95,27 @@ def getEOXBySerialNumber():
         usage("You must specify the file option or serial number(s).")
 
     serials = args
-    inputfile = open(options.file, 'r')
-    for line in inputfile:
-        serials.append(line.strip())
+    if options.file:
+        inputfile = open(options.file, 'r')
+        for line in inputfile:
+            serials.append(line.strip())
+
+        inputfile.close()
 
     writer = csv.writer(sys.stdout)
     writer.writerow(EOXRecord.propertyNames)
 
     server = Server(options.username, options.password, options.threads)
 
-    records = server.getEOXBySerialNumber(serialNumbers=serials)
+    try:
+        records = server.getEOXBySerialNumber(serialNumbers=serials)
 
-    for record in records:
-        row = []
-        for propertyName in EOXRecord.propertyNames:
-            row.append(getattr(record, propertyName, ''))
+        for record in records:
+            row = []
+            for propertyName in EOXRecord.propertyNames:
+                row.append(getattr(record, propertyName, ''))
 
-        writer.writerow(row)
+            writer.writerow(row)
+
+    except EOXException, ex:
+        log.error(ex)
