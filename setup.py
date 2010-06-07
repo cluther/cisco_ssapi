@@ -20,7 +20,7 @@
 from setuptools import setup, find_packages
 import sys, os
 
-version = '0.2'
+version = '0.3'
 
 setup(
     name='cisco_ssapi',
@@ -59,6 +59,7 @@ setup(
         ],
     entry_points={
         'console_scripts': [
+            'get_eox = cisco_ssapi.scripts:getAllEOX',
             'get_eox_by_dates = cisco_ssapi.scripts:getEOXByDates',
             'get_eox_by_serial = cisco_ssapi.scripts:getEOXBySerialNumber'
             ]

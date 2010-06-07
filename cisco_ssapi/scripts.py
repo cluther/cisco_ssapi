@@ -27,6 +27,43 @@ import sys
 from cisco_ssapi.eox import getOptionParser, Server, EOXException, EOXRecord
 
 
+def getAllEOX():
+    def usage(msg=None):
+        if msg:
+            print >> sys.stderr, msg
+        print >> sys.stderr, "Usage: %s <-u username> <-p password>" % sys.argv[0]
+        sys.exit(1)
+
+    parser = getOptionParser()
+    options = parser.parse_args()[0]
+
+    if not options.username:
+        usage("You must specify your EOX username.")
+
+    if not options.password:
+        usage("You must specify your EOX password.")
+
+    writer = csv.writer(sys.stdout)
+    writer.writerow(EOXRecord.propertyNames)
+
+    server = Server(options.username, options.password, options.threads)
+
+    try:
+        product_ids = []
+        for product in server.getAllProductIDs():
+            product_ids.append(product.ProductID)
+            row = []
+
+        for record in server.getEOXByProductID(product_ids):
+            for propertyName in EOXRecord.propertyNames:
+                row.append(getattr(record, propertyName, ''))
+
+            writer.writerow(row)
+
+    except EOXException, ex:
+        log.error(ex)
+
+
 def getEOXByDates():
     def usage(msg=None):
         if msg:
