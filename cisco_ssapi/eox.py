@@ -74,6 +74,9 @@ def getOptionParser():
     parser.add_option('-t', '--threads', dest='threads',
         type='int', default=4,
         help='Number of EOX server threads to use')
+    parser.add_option('-c', '--chunk', dest='chunk',
+        type='int', default=EOX_GROUP_LIMIT,
+        help='Chunk size for multiple requests')
 
     return parser
 
@@ -129,7 +132,7 @@ class Server(object):
         log.info("Retrieved %s records from %s method.", count, method)
 
 
-    def getEOXByOID(self, oids, hardwareType=None):
+    def getEOXByOID(self, oids, hardwareType=None, chunkSize=EOX_GROUP_LIMIT):
         action = 'showEOXByOID'
         method = 'ShowEOXByOIDRequest'
 
@@ -139,7 +142,7 @@ class Server(object):
         else:
             extra = ''
 
-        for chunk in chunkList(oids):
+        for chunk in chunkList(oids, chunkSize):
             body = ''
             for oid in chunk:
                 body += '<ns:OIDRecord><ns:OID>%s</ns:OID>%s</ns:OIDRecord>' % (
@@ -149,11 +152,11 @@ class Server(object):
                 yield eoxRecord
 
 
-    def getEOXByProductID(self, productIDs):
+    def getEOXByProductID(self, productIDs, chunkSize=EOX_GROUP_LIMIT):
         action = 'showEOXByProductID'
         method = 'ShowEOXByProductIDRequest'
 
-        for chunk in chunkList(productIDs):
+        for chunk in chunkList(productIDs, chunkSize):
             body = """
                 <ns:ProductIDs>%s</ns:ProductIDs>
                 """ % ','.join(chunk)
@@ -162,11 +165,11 @@ class Server(object):
                 yield eoxRecord
 
 
-    def getEOXBySerialNumber(self, serialNumbers):
+    def getEOXBySerialNumber(self, serialNumbers, chunkSize=EOX_GROUP_LIMIT):
         action = 'showEOXBySerialNumber'
         method = 'ShowEOXBySerialNumberRequest'
 
-        for chunk in chunkList(serialNumbers):
+        for chunk in chunkList(serialNumbers, chunkSize):
             body = """
                 <ns:SerialNumbers>%s</ns:SerialNumbers>
                 """ % ','.join(chunk)
@@ -175,7 +178,7 @@ class Server(object):
                 yield eoxRecord
 
 
-    def getEOXBySWReleaseString(self, swReleaseStrings, osType=None):
+    def getEOXBySWReleaseString(self, swReleaseStrings, osType=None, chunkSize=EOX_GROUP_LIMIT):
         action = 'showEOXBySWReleaseString'
         method = 'ShowEOXBySWReleaseStringRequest'
 
@@ -185,7 +188,7 @@ class Server(object):
         else:
             extra = ''
 
-        for chunk in chunkList(swReleaseStrings):
+        for chunk in chunkList(swReleaseStrings, chunkSize):
             body = ''
             for swReleaseString in chunk:
                 body += '<ns:SWReleaseStringRecord><ns:SWReleaseString>%s</ns:SWReleaseString>%s</ns:SWReleaseStringRecord>' % (
@@ -208,7 +211,25 @@ class Server(object):
         count = 0
         for eoxRecord in xml.getElementsByTagName('%s:EOXRecord' % ns):
             count += 1
-            yield EOXRecord(ns, eoxRecord)
+            record = EOXRecord(ns, eoxRecord)
+            if not record.EOXError:
+                yield record
+            
+            # Sometimes we can find the EOLProductID in the error response's
+            # description even when no EOL data is found.
+            #
+            # Cisco will likely be fixing this to include the EOLProductID in
+            # the EOXRecord itself in this scenario in the future, but for now
+            # we'll parse it out of the error.
+            elif record.EOXError.ErrorID == 'SSA_ERR_026':
+                record.EOLProductID = \
+                    record.EOXError.ErrorDescription.split(' ')[-1]
+
+                yield record
+
+            else:
+                log.warning("%s: %s",
+                    record.EOXError.ErrorID, record.EOXError.ErrorDescription)
 
         log.info("Retrieved %s records from %s method.", count, method)
 
