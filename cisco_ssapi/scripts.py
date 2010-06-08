@@ -24,7 +24,32 @@ log = logging.getLogger()
 import csv
 import sys
 
-from cisco_ssapi.eox import getOptionParser, Server, EOXException, EOXRecord
+from cisco_ssapi.eox import getOptionParser as eoxOptionParser
+from cisco_ssapi.eox import Server, EOXException, EOXRecord
+
+
+def getOptionParser():
+    parser = eoxOptionParser()
+    parser.add_option('-d', '--delimiter', dest='delimiter', default=',',
+        help='Output field delimiter')
+    return parser
+
+
+def getOptions(parser, usage=None):
+    options, args = parser.parse_args()
+
+    # Enforce common required options.
+    if not options.username:
+        usage("You must specify your EOX username.")
+
+    if not options.password:
+        usage("You must specify your EOX password.")
+
+    # Handle shell-escaped tab delimiter.
+    if options.delimiter == '\\t':
+        options.delimiter = '\t'
+
+    return options, args
 
 
 def getAllEOX():
@@ -34,16 +59,9 @@ def getAllEOX():
         print >> sys.stderr, "Usage: %s <-u username> <-p password>" % sys.argv[0]
         sys.exit(1)
 
-    parser = getOptionParser()
-    options = parser.parse_args()[0]
+    options = getOptions(getOptionParser(), usage)[0]
 
-    if not options.username:
-        usage("You must specify your EOX username.")
-
-    if not options.password:
-        usage("You must specify your EOX password.")
-
-    writer = csv.writer(sys.stdout)
+    writer = csv.writer(sys.stdout, delimiter=options.delimiter)
     writer.writerow(EOXRecord.propertyNames)
 
     server = Server(options.username, options.password, options.threads)
@@ -76,13 +94,7 @@ def getEOXByDates():
         help='Start date (MM/DD/YYYY)')
     parser.add_option('-e', '--end', dest='end',
         help='End date (MM/DD/YYYY)')
-    options = parser.parse_args()[0]
-
-    if not options.username:
-        usage("You must specify your EOX username.")
-
-    if not options.password:
-        usage("You must specify your EOX password.")
+    options = getOptions(parser, usage)[0]
 
     if not options.start:
         usage("You must specify the start date.")
@@ -90,7 +102,7 @@ def getEOXByDates():
     if not options.end:
         usage("You must specify the end date.")
 
-    writer = csv.writer(sys.stdout)
+    writer = csv.writer(sys.stdout, delimiter=options.delimiter)
     writer.writerow(EOXRecord.propertyNames)
 
     server = Server(options.username, options.password, options.threads)
@@ -121,13 +133,7 @@ def getEOXBySerialNumber():
     parser = getOptionParser()
     parser.add_option('-f', '--file', dest='file',
         help='Serial number input file.')
-    (options, args) = parser.parse_args()
-
-    if not options.username:
-        usage("You must specify your EOX username.")
-
-    if not options.password:
-        usage("You must specify your EOX password.")
+    (options, args) = getOptions(parser, usage)
 
     if not options.file and len(args) < 1:
         usage("You must specify the file option or serial number(s).")
@@ -140,7 +146,7 @@ def getEOXBySerialNumber():
 
         inputfile.close()
 
-    writer = csv.writer(sys.stdout)
+    writer = csv.writer(sys.stdout, delimiter=options.delimiter)
     writer.writerow(EOXRecord.propertyNames)
 
     server = Server(options.username, options.password, options.threads)
