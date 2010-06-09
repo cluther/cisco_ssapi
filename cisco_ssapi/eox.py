@@ -20,6 +20,7 @@
 import logging
 log = logging.getLogger('cisco_ssapi.eox')
 
+import os
 import re
 import socket
 import threading
@@ -28,6 +29,11 @@ from optparse import OptionParser
 from xml.dom.minidom import parseString
 from xml.parsers.expat import ExpatError
 from xml.sax.saxutils import escape as xml_escape
+
+try:
+    from hashlib import md5
+except ImportError:
+    from md5 import md5
 
 
 EOX_SERVER = "wsgx.cisco.com"
@@ -78,14 +84,18 @@ def getOptionParser():
     parser.add_option('-c', '--chunk', dest='chunk',
         type='int', default=EOX_GROUP_LIMIT,
         help='Chunk size for multiple requests')
+    parser.add_option('--cache', dest='cache',
+        action='store_true', default=False,
+        help='Use cached SOAP responses for faster testing')
 
     return parser
 
 
 class Server(object):
-    def __init__(self, username, password, threads=EOX_THREADS):
+    def __init__(self, username, password, threads=EOX_THREADS, cache=False):
         socket.setdefaulttimeout(EOX_TIMEOUT)
         self._threads = threads
+        self._cache = cache
         self._headers = {
             "Content-type": "text/xml; charset=utf-8",
             "User-Agent": "EOXConverter",
@@ -274,6 +284,38 @@ class Server(object):
                     thread.start()
 
 
+    def getSoapResponse(self, url, headers, body):
+        """
+        Helper method to pull an existing SOAP response from cache if caching
+        is enabled and a previous response exists. Otherwise the SOAP server
+        request is made and the result is cached.
+        """
+        cachedir = os.path.expanduser('~/.cisco_ssapi')
+        if not os.path.isdir(cachedir):
+            os.mkdir(cachedir)
+
+        cachefile = os.path.join(
+            cachedir, md5('%s%s' % (body, headers)).hexdigest())
+
+        if self._cache:
+            if os.path.isfile(cachefile):
+                f = open(cachefile, 'r')
+                xml_string = f.read()
+                f.close()
+                return xml_string
+        
+        conn = HTTPSConnection(EOX_SERVER, 443)
+        conn.request('POST', url, body, headers)
+        response = conn.getresponse()
+        xml_string = response.read()
+
+        f = open(cachefile, 'w')
+        f.write(xml_string)
+        f.close()
+        
+        return xml_string
+
+
     def soapCall(self, action, body, bulk=False):
         headers = self._headers
         headers.update({'SOAPAction': action})
@@ -282,31 +324,39 @@ class Server(object):
         xml_string = None
         xml = None
 
-        # Handle up to 10 timeouts.
+        # Handle up to 10 timeouts and transient failures.
+        error_string = ""
         for _i in range(10):
             try:
-                conn = HTTPSConnection(EOX_SERVER, 443)
-                conn.request(
-                    "POST", bulk and EOX_URL_BULK or EOX_URL, body, headers)
-                response = conn.getresponse()
-                xml_string = response.read()
-                break
+                xml_string = self.getSoapResponse(
+                    bulk and EOX_URL_BULK or EOX_URL, headers, body)
             except socket.timeout:
-                pass
+                error_string = "timeout on Cisco SSAPI server"
+                log.warn(error_string)
+                continue
+
+            # Handle bad XML coming back.
+            try:
+                xml = parseString(xml_string)
+            except ExpatError, ex:
+                raise EOXException(ex)
+
+            # Handle generic SOAP errors.
+            error_details = xml.getElementsByTagName('det:detailmessage')
+            if error_details:
+                detailmessage = error_details[0].childNodes[0].data
+                # Retry on transient errors in destination service.
+                if 'destination service' in detailmessage:
+                    error_string = detailmessage
+                    log.warn(error_string)
+                    continue
+
+                import pdb; pdb.set_trace()
+                raise EOXException(detailmessage)
+
+            break
         else:
-            raise EOXException("Timeout on Cisco SSAPI server")
-
-        # Handle bad XML coming back.
-        try:
-            xml = parseString(xml_string)
-        except ExpatError, ex:
-            raise EOXException(ex)
-
-        # Handle generic SOAP errors.
-        error_details = xml.getElementsByTagName('det:detailmessage')
-        if error_details:
-            import pdb; pdb.set_trace()
-            raise EOXException(error_details[0].childNodes[0].data)
+            raise EOXException(error_string)
 
         # The XMLNS keeps changing. Figure it out dynamically.
         match = re.search(r' xmlns:(axis[^=]+)', xml_string)

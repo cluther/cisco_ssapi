@@ -19,7 +19,7 @@
 
 from setuptools import setup, find_packages
 
-version = '0.5'
+version = '0.6'
 
 setup(
     name='cisco_ssapi',
