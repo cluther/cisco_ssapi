@@ -27,6 +27,7 @@ from httplib import HTTPSConnection
 from optparse import OptionParser
 from xml.dom.minidom import parseString
 from xml.parsers.expat import ExpatError
+from xml.sax.saxutils import escape as xml_escape
 
 
 EOX_SERVER = "wsgx.cisco.com"
@@ -113,7 +114,7 @@ class Server(object):
 
         extra = None
         if eoxAttrib:
-            extra = '<ns:eoxAttrib>%s</ns:eoxAttrib>' % eoxAttrib
+            extra = '<ns:eoxAttrib>%s</ns:eoxAttrib>' % xml_escape(eoxAttrib)
         else:
             extra = ''
 
@@ -121,7 +122,7 @@ class Server(object):
             <ns:startDate>%s</ns:startDate>
             <ns:endDate>%s</ns:endDate>
             %s
-            """ % (startDate, endDate, extra)
+            """ % (xml_escape(startDate), xml_escape(endDate), extra)
 
         count = 0
         for ns, xml in self.getPaginatedResults(action, method, body):
@@ -138,7 +139,8 @@ class Server(object):
 
         extra = None
         if hardwareType:
-            extra = '<ns:HardwareType>%s</ns:HardwareType>' % hardwareType
+            extra = '<ns:HardwareType>%s</ns:HardwareType>' % (
+                    xml_escape(hardwareType))
         else:
             extra = ''
 
@@ -146,7 +148,7 @@ class Server(object):
             body = ''
             for oid in chunk:
                 body += '<ns:OIDRecord><ns:OID>%s</ns:OID>%s</ns:OIDRecord>' % (
-                    oid, extra)
+                    xml_escape(oid), extra)
 
             for eoxRecord in self.getResults(action, method, body):
                 yield eoxRecord
@@ -159,7 +161,7 @@ class Server(object):
         for chunk in chunkList(productIDs, chunkSize):
             body = """
                 <ns:ProductIDs>%s</ns:ProductIDs>
-                """ % ','.join(chunk)
+                """ % xml_escape(','.join(chunk))
 
             for eoxRecord in self.getResults(action, method, body):
                 yield eoxRecord
@@ -172,7 +174,7 @@ class Server(object):
         for chunk in chunkList(serialNumbers, chunkSize):
             body = """
                 <ns:SerialNumbers>%s</ns:SerialNumbers>
-                """ % ','.join(chunk)
+                """ % xml_escape(','.join(chunk))
 
             for eoxRecord in self.getResults(action, method, body):
                 yield eoxRecord
@@ -184,7 +186,7 @@ class Server(object):
 
         extra = None
         if osType:
-            extra = '<ns:OSType>%s</ns:OSType>' % osType
+            extra = '<ns:OSType>%s</ns:OSType>' % xml_escape(osType)
         else:
             extra = ''
 
@@ -192,7 +194,7 @@ class Server(object):
             body = ''
             for swReleaseString in chunk:
                 body += '<ns:SWReleaseStringRecord><ns:SWReleaseString>%s</ns:SWReleaseString>%s</ns:SWReleaseStringRecord>' % (
-                    swReleaseString, extra)
+                    xml_escape(swReleaseString), extra)
 
             for eoxRecord in self.getResults(action, method, body):
                 yield eoxRecord
@@ -303,6 +305,7 @@ class Server(object):
         # Handle generic SOAP errors.
         error_details = xml.getElementsByTagName('det:detailmessage')
         if error_details:
+            import pdb; pdb.set_trace()
             raise EOXException(error_details[0].childNodes[0].data)
 
         # The XMLNS keeps changing. Figure it out dynamically.

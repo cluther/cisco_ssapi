@@ -70,9 +70,9 @@ def getAllEOX():
         product_ids = []
         for product in server.getAllProductIDs():
             product_ids.append(product.ProductID)
-            row = []
 
         for record in server.getEOXByProductID(product_ids):
+            row = []
             for propertyName in EOXRecord.propertyNames:
                 row.append(getattr(record, propertyName, ''))
 
