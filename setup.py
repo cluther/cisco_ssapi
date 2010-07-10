@@ -60,7 +60,7 @@ setup(
         'console_scripts': [
             'get_eox = cisco_ssapi.scripts:getAllEOX',
             'get_eox_by_dates = cisco_ssapi.scripts:getEOXByDates',
-            'get_eox_by_serial = cisco_ssapi.scripts:getEOXBySerialNumber'
+            'get_eox_by_serial = cisco_ssapi.scripts:getEOXBySerialNumber',
             ]
         },
     )

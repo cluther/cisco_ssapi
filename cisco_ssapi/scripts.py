@@ -109,8 +109,7 @@ def getEOXByDates():
 
     try:
         records = server.getEOXByDates(
-            startDate=options.start, endDate=options.end,
-            chunkSize=options.chunk)
+            startDate=options.start, endDate=options.end)
 
         for record in records:
             row = []
@@ -152,8 +151,7 @@ def getEOXBySerialNumber():
     server = Server(options.username, options.password, options.threads)
 
     try:
-        records = server.getEOXBySerialNumber(
-            serialNumbers=serials, chunkSize=options.chunk)
+        records = server.getEOXBySerialNumber(serialNumbers=serials)
 
         for record in records:
             row = []

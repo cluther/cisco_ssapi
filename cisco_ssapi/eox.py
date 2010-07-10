@@ -37,7 +37,6 @@ except ImportError:
 
 
 EOX_SERVER = "wsgx.cisco.com"
-EOX_URL = "/ssapi/eox/1/EOXLookupService"
 EOX_URL_BULK = "/ssapi/eox/1/BulkEOXLookupService"
 EOX_TIMEOUT = 60
 EOX_THREADS = 4
@@ -57,17 +56,6 @@ class EOXException(Exception):
     pass
 
 
-def chunkList(original, size=EOX_GROUP_LIMIT):
-    """
-    Conveinence method for breaking a long list into a list of lists that won't
-    exceed "size" in length.
-    """
-    while original:
-        newlist = original[:size]
-        original = original[size:]
-        yield newlist
-
-
 def getOptionParser():
     """
     Convenience method for getting an OptionParser with the common items you'll
@@ -81,9 +69,6 @@ def getOptionParser():
     parser.add_option('-t', '--threads', dest='threads',
         type='int', default=4,
         help='Number of EOX server threads to use')
-    parser.add_option('-c', '--chunk', dest='chunk',
-        type='int', default=EOX_GROUP_LIMIT,
-        help='Chunk size for multiple requests')
     parser.add_option('--cache', dest='cache',
         action='store_true', default=False,
         help='Use cached SOAP responses for faster testing')
@@ -143,7 +128,7 @@ class Server(object):
         log.info("Retrieved %s records from %s method.", count, method)
 
 
-    def getEOXByOID(self, oids, hardwareType=None, chunkSize=EOX_GROUP_LIMIT):
+    def getEOXByOID(self, oids, hardwareType=None):
         action = 'showEOXByOID'
         method = 'ShowEOXByOIDRequest'
 
@@ -154,43 +139,55 @@ class Server(object):
         else:
             extra = ''
 
-        for chunk in chunkList(oids, chunkSize):
-            body = ''
-            for oid in chunk:
-                body += '<ns:OIDRecord><ns:OID>%s</ns:OID>%s</ns:OIDRecord>' % (
-                    xml_escape(oid), extra)
+        body = ''
+        for oid in oids:
+            body += '<ns:OIDRecord><ns:OID>%s</ns:OID>%s</ns:OIDRecord>' % (
+                xml_escape(oid), extra)
 
-            for eoxRecord in self.getResults(action, method, body):
-                yield eoxRecord
+        count = 0
+        for ns, xml in self.getPaginatedResults(action, method, body):
+            for eoxRecord in xml.getElementsByTagName('%s:EOXRecord' % ns):
+                count += 1
+                yield EOXRecord(ns, eoxRecord)
+
+        log.info("Retrieved %s records from %s method.", count, method)
 
 
-    def getEOXByProductID(self, productIDs, chunkSize=EOX_GROUP_LIMIT):
+    def getEOXByProductID(self, productIDs):
         action = 'showEOXByProductID'
         method = 'ShowEOXByProductIDRequest'
 
-        for chunk in chunkList(productIDs, chunkSize):
-            body = """
-                <ns:ProductIDs>%s</ns:ProductIDs>
-                """ % xml_escape(','.join(chunk))
+        body = """
+            <ns:ProductIDs>%s</ns:ProductIDs>
+            """ % xml_escape(','.join(productIDs))
 
-            for eoxRecord in self.getResults(action, method, body):
-                yield eoxRecord
+        count = 0
+        for ns, xml in self.getPaginatedResults(action, method, body):
+            for eoxRecord in xml.getElementsByTagName('%s:EOXRecord' % ns):
+                count += 1
+                yield EOXRecord(ns, eoxRecord)
+
+        log.info("Retrieved %s records from %s method.", count, method)
 
 
-    def getEOXBySerialNumber(self, serialNumbers, chunkSize=EOX_GROUP_LIMIT):
+    def getEOXBySerialNumber(self, serialNumbers):
         action = 'showEOXBySerialNumber'
         method = 'ShowEOXBySerialNumberRequest'
 
-        for chunk in chunkList(serialNumbers, chunkSize):
-            body = """
-                <ns:SerialNumbers>%s</ns:SerialNumbers>
-                """ % xml_escape(','.join(chunk))
+        body = """
+            <ns:SerialNumbers>%s</ns:SerialNumbers>
+            """ % xml_escape(','.join(serialNumbers))
 
-            for eoxRecord in self.getResults(action, method, body):
-                yield eoxRecord
+        count = 0
+        for ns, xml in self.getPaginatedResults(action, method, body):
+            for eoxRecord in xml.getElementsByTagName('%s:EOXRecord' % ns):
+                count += 1
+                yield EOXRecord(ns, eoxRecord)
+
+        log.info("Retrieved %s records from %s method.", count, method)
 
 
-    def getEOXBySWReleaseString(self, swReleaseStrings, osType=None, chunkSize=EOX_GROUP_LIMIT):
+    def getEOXBySWReleaseString(self, swReleaseStrings, osType=None):
         action = 'showEOXBySWReleaseString'
         method = 'ShowEOXBySWReleaseStringRequest'
 
@@ -200,48 +197,16 @@ class Server(object):
         else:
             extra = ''
 
-        for chunk in chunkList(swReleaseStrings, chunkSize):
-            body = ''
-            for swReleaseString in chunk:
-                body += '<ns:SWReleaseStringRecord><ns:SWReleaseString>%s</ns:SWReleaseString>%s</ns:SWReleaseStringRecord>' % (
-                    xml_escape(swReleaseString), extra)
-
-            for eoxRecord in self.getResults(action, method, body):
-                yield eoxRecord
-
-
-    def getResults(self, action, method, body):
-        log.info("Calling %s method.", method)
-        body = """
-            <ns:%s>
-            %s
-            </ns:%s>
-            """ % (method, body, method)
-
-        ns, xml = self.soapCall(action, body, bulk=False)
+        body = ''
+        for swReleaseString in swReleaseStrings:
+            body += '<ns:SWReleaseStringRecord><ns:SWReleaseString>%s</ns:SWReleaseString>%s</ns:SWReleaseStringRecord>' % (
+                xml_escape(swReleaseString), extra)
 
         count = 0
-        for eoxRecord in xml.getElementsByTagName('%s:EOXRecord' % ns):
-            count += 1
-            record = EOXRecord(ns, eoxRecord)
-            if not record.EOXError:
-                yield record
-            
-            # Sometimes we can find the EOLProductID in the error response's
-            # description even when no EOL data is found.
-            #
-            # Cisco will likely be fixing this to include the EOLProductID in
-            # the EOXRecord itself in this scenario in the future, but for now
-            # we'll parse it out of the error.
-            elif record.EOXError.ErrorID == 'SSA_ERR_026':
-                record.EOLProductID = \
-                    record.EOXError.ErrorDescription.split(' ')[-1]
-
-                yield record
-
-            else:
-                log.warning("%s: %s",
-                    record.EOXError.ErrorID, record.EOXError.ErrorDescription)
+        for ns, xml in self.getPaginatedResults(action, method, body):
+            for eoxRecord in xml.getElementsByTagName('%s:EOXRecord' % ns):
+                count += 1
+                yield EOXRecord(ns, eoxRecord)
 
         log.info("Retrieved %s records from %s method.", count, method)
 
@@ -257,14 +222,22 @@ class Server(object):
             </ns:%s>
             """ % (method, body, page, method)
 
-        ns, xml = self.soapCall(action, local_body, bulk=True)
+        ns, xml = self.soapCall(action, local_body)
         lastIndex = int(xml.getElementsByTagName(
             '%s:LastIndex' % ns)[0].childNodes[0].data)
+
+        totalRecords = int(xml.getElementsByTagName(
+            '%s:TotalRecords' % ns)[0].childNodes[0].data)
+
+        pageRecords = int(xml.getElementsByTagName(
+            '%s:PageRecords' % ns)[0].childNodes[0].data)
 
         yield (ns, xml)
 
         if page == 1:
-            log.info("%s pages available for %s.", lastIndex, method)
+            log.info("%s pages, %s records and %s records per page for %s.",
+                lastIndex, totalRecords, pageRecords, method)
+
             page += 1
             threads = {}
             while True:
@@ -316,7 +289,7 @@ class Server(object):
         return xml_string
 
 
-    def soapCall(self, action, body, bulk=False):
+    def soapCall(self, action, body):
         headers = self._headers
         headers.update({'SOAPAction': action})
         body = SOAP_TEMPLATE % body
@@ -328,8 +301,7 @@ class Server(object):
         error_string = ""
         for _i in range(10):
             try:
-                xml_string = self.getSoapResponse(
-                    bulk and EOX_URL_BULK or EOX_URL, headers, body)
+                xml_string = self.getSoapResponse(EOX_URL_BULK, headers, body)
             except socket.timeout:
                 error_string = "timeout on Cisco SSAPI server"
                 log.warn(error_string)
@@ -363,6 +335,7 @@ class Server(object):
         if match:
             return (match.group(1), xml)
         else:
+            import pdb; pdb.set_trace()
             raise EOXException("No axis xmlns in response")
 
 
