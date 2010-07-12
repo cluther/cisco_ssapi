@@ -19,19 +19,32 @@
 
 import logging
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger()
+log = logging.getLogger('eox')
 
 import csv
 import sys
+import types
 
-from cisco_ssapi.eox import getOptionParser as eoxOptionParser
-from cisco_ssapi.eox import Server, EOXException, EOXRecord
+from optparse import OptionParser
+
+import eox
 
 
 def getOptionParser():
-    parser = eoxOptionParser()
+    """
+    Convenience method for getting an OptionParser with the common items you'll
+    need to query EOX.
+    """
+    parser = OptionParser()
+    parser.add_option('-u', '--username', dest='username',
+        help='Cisco EOX username')
+    parser.add_option('-p', '--password', dest='password',
+        help='Cisco EOX password')
     parser.add_option('-d', '--delimiter', dest='delimiter', default=',',
         help='Output field delimiter')
+    parser.add_option('-t', '--threads', dest='threads',
+        type='int', default=eox.THREADS,
+        help='Number of EOX server threads to use')
     return parser
 
 
@@ -52,6 +65,70 @@ def getOptions(parser, usage=None):
     return options, args
 
 
+def writeProductRecords(gen, delimiter):
+    writer = csv.writer(sys.stdout, delimiter=delimiter)
+    writer.writerow(['ProductID', 'ProductDescription'])
+    
+    for response in gen:
+        error = getattr(response, 'EOXError', None)
+        if error:
+            log.error('%s: %s', error.ErrorID, error.ErrorDescription)
+            continue
+
+        if not hasattr(response, 'ProductIDRecord'):
+            continue
+        
+        for record in response.ProductIDRecord:
+            error = getattr(record, 'EOXError', None)
+            if error:
+                log.warn('%s: %s',
+                    error.ErrorID,
+                    error.ErrorDescription)
+
+            writer.writerow([record.ProductID, record.ProductDescription])
+            sys.stdout.flush()
+
+
+def writeEOXRecords(gen, delimiter):
+    writer = csv.writer(sys.stdout, delimiter=delimiter)
+    writer.writerow(eox.RECORD_COLUMNS)
+
+    for response in gen:
+        error = getattr(response, 'EOXError', None)
+        if error:
+            log.error('%s: %s', error.ErrorID, error.ErrorDescription)
+            continue
+
+        if not hasattr(response, 'EOXRecord'):
+            continue
+
+        for record in response.EOXRecord:
+            error = getattr(record, 'EOXError', None)
+            if error:
+                log.warn('%s: %s',
+                    error.ErrorID,
+                    error.ErrorDescription)
+
+                if error.ErrorDataType == 'PRODUCT_ID':
+                    setattr(record, 'EOLProductID', error.ErrorDataValue)
+                
+            row = []
+            for column_name in eox.RECORD_COLUMNS:
+                column = getattr(record, column_name, '')
+                value = None
+                if column is None:
+                    value = ''
+                elif isinstance(column, types.StringTypes):
+                    value = column
+                else:
+                    value = column.value
+                    
+                row.append(value.strip())
+
+            writer.writerow(row)
+            sys.stdout.flush()
+
+
 def getAllEOX():
     def usage(msg=None):
         if msg:
@@ -60,27 +137,21 @@ def getAllEOX():
         sys.exit(1)
 
     options = getOptions(getOptionParser(), usage)[0]
+    server = eox.Server(options.username, options.password, options.threads)
+    writeEOXRecords(server.getAll(), options.delimiter)
 
-    writer = csv.writer(sys.stdout, delimiter=options.delimiter)
-    writer.writerow(EOXRecord.propertyNames)
 
-    server = Server(options.username, options.password, options.threads)
+def getAllProducts():
+    def usage(msg=None):
+        if msg:
+            print >> sys.stderr, msg
+        print >> sys.stderr, "Usage: %s <-u username> <-p password>" % sys.argv[0]
+        sys.exit(1)
 
-    try:
-        product_ids = []
-        for product in server.getAllProductIDs():
-            product_ids.append(product.ProductID)
-
-        for record in server.getEOXByProductID(product_ids):
-            row = []
-            for propertyName in EOXRecord.propertyNames:
-                row.append(getattr(record, propertyName, ''))
-
-            writer.writerow(row)
-
-    except EOXException, ex:
-        log.error(ex)
-
+    options = getOptions(getOptionParser(), usage)[0]
+    server = eox.Server(options.username, options.password, options.threads)
+    writeProductRecords(server.getAllProductIDs(), options.delimiter)
+    
 
 def getEOXByDates():
     def usage(msg=None):
@@ -91,35 +162,80 @@ def getEOXByDates():
 
     parser = getOptionParser()
     parser.add_option('-s', '--start', dest='start',
-        help='Start date (MM/DD/YYYY)')
+        help='Start date (YYYY-MM-DD)')
     parser.add_option('-e', '--end', dest='end',
-        help='End date (MM/DD/YYYY)')
+        help='End date (YYYY-MM-DD)')
     options = getOptions(parser, usage)[0]
 
     if not options.start:
-        usage("You must specify the start date.")
+        usage("You must specify the start date (YYYY-MM-DD).")
 
     if not options.end:
-        usage("You must specify the end date.")
+        usage("You must specify the end date (YYYY-MM-DD.")
 
-    writer = csv.writer(sys.stdout, delimiter=options.delimiter)
-    writer.writerow(EOXRecord.propertyNames)
+    server = eox.Server(options.username, options.password, options.threads)
+    writeEOXRecords(
+        server.getEOXByDates(options.start, options.end, None),
+        options.delimiter)
 
-    server = Server(options.username, options.password, options.threads)
 
-    try:
-        records = server.getEOXByDates(
-            startDate=options.start, endDate=options.end)
+def getEOXByOID():
+    def usage(msg=None):
+        if msg:
+            print >> sys.stderr, msg
+        print >> sys.stderr, "Usage: %s <-u username> <-p password> <-h hardwareType> <OID> [OID]" % sys.argv[0]
+        sys.exit(1)
 
-        for record in records:
-            row = []
-            for propertyName in EOXRecord.propertyNames:
-                row.append(getattr(record, propertyName, ''))
+    parser = getOptionParser()
+    parser.add_option('-h', '--hardwareType', dest='hardwareType',
+        help='Hardware type')
+    options, args = getOptions(parser, usage)
 
-            writer.writerow(row)
+    if not options.hardwareType:
+        usage("You must specify the hardware type.")
 
-    except EOXException, ex:
-        log.error(ex)
+    if len(args) < 1:
+        usage("You must specify the OID(s).")
+
+    server = eox.Server(options.username, options.password, options.threads)
+    writeEOXRecords(server.getEOXByOID(args), options.delimiter)
+
+
+def getEOXByProductID():
+    def usage(msg=None):
+        if msg:
+            print >> sys.stderr, msg
+        print >> sys.stderr, "Usage: %s <-u username> <-p password> <productID> [productID] [...]" % sys.argv[0]
+        sys.exit(1)
+
+    options, args = getOptions(getOptionParser(), usage)
+    if len(args) < 1:
+        usage("You must specify the product ID(s).")
+
+    server = eox.Server(options.username, options.password, options.threads)
+    writeEOXRecords(server.getEOXByProductID(args), options.delimiter)
+
+
+def getEOXBySWRelease():
+    def usage(msg=None):
+        if msg:
+            print >> sys.stderr, msg
+        print >> sys.stderr, "Usage: %s <-u username> <-p password> <-o osType> <swRelease> [swRelease]" % sys.argv[0]
+        sys.exit(1)
+
+    parser = getOptionParser()
+    parser.add_option('-o', '--osType', dest='osType',
+        help='Operating system type')
+    options, args = getOptions(parser, usage)
+
+    if not options.osType:
+        usage("You must specify the operating system type.")
+
+    if len(args) < 1:
+        usage("You must specify the software release(es).")
+
+    server = eox.Server(options.username, options.password, options.threads)
+    writeEOXRecords(server.getEOXBySWReleaseString(args), options.delimiter)
 
 
 def getEOXBySerialNumber():
@@ -145,20 +261,5 @@ def getEOXBySerialNumber():
 
         inputfile.close()
 
-    writer = csv.writer(sys.stdout, delimiter=options.delimiter)
-    writer.writerow(EOXRecord.propertyNames)
-
-    server = Server(options.username, options.password, options.threads)
-
-    try:
-        records = server.getEOXBySerialNumber(serialNumbers=serials)
-
-        for record in records:
-            row = []
-            for propertyName in EOXRecord.propertyNames:
-                row.append(getattr(record, propertyName, ''))
-
-            writer.writerow(row)
-
-    except EOXException, ex:
-        log.error(ex)
+    server = eox.Server(options.username, options.password, options.threads)
+    writeEOXRecords(server.getEOXBySerialNumber(serials), options.delimiter)

@@ -19,12 +19,12 @@
 
 from setuptools import setup, find_packages
 
-version = '0.6'
+version = '0.7'
 
 setup(
     name='cisco_ssapi',
     version=version,
-    description="Python API to Cisco's SSAPI (Smart Support Web Services API)",
+    description="Python API and CLI access to Cisco's SSAPI",
     long_description="""\
 """,
 
@@ -53,13 +53,19 @@ setup(
     packages=find_packages(exclude=['ez_setup', 'examples', 'tests']),
     include_package_data=True,
     zip_safe=False,
+
     install_requires=[
-        # -*- Extra requirements: -*-
+        'suds >= 0.3.8',
         ],
+
     entry_points={
         'console_scripts': [
             'get_eox = cisco_ssapi.scripts:getAllEOX',
+            'get_eox_products = cisco_ssapi.scripts:getAllProducts',
             'get_eox_by_dates = cisco_ssapi.scripts:getEOXByDates',
+            'get_eox_by_oid = cisco_ssapi.scripts:getEOXByOID',
+            'get_eox_by_product = cisco_ssapi.scripts:getEOXByProductID',
+            'get_eox_by_sw = cisco_ssapi.scripts:getEOXBySWRelease',
             'get_eox_by_serial = cisco_ssapi.scripts:getEOXBySerialNumber',
             ]
         },
