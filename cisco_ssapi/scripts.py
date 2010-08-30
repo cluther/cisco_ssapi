@@ -109,7 +109,7 @@ def writeEOXRecords(gen, delimiter):
                     error.ErrorID,
                     error.ErrorDescription)
 
-                if error.ErrorDataType == 'PRODUCT_ID':
+                if getattr(error, 'ErrorDataType', '') == 'PRODUCT_ID': 
                     setattr(record, 'EOLProductID', error.ErrorDataValue)
                 
             row = []
