@@ -67,7 +67,7 @@ def getOptions(parser, usage=None):
 
 def writeProductRecords(gen, delimiter):
     writer = csv.writer(sys.stdout, delimiter=delimiter)
-    writer.writerow(['ProductID', 'ProductDescription'])
+    writer.writerow(['ProductID', 'ProductIDDescription'])
     
     for response in gen:
         error = getattr(response, 'EOXError', None)
@@ -85,7 +85,7 @@ def writeProductRecords(gen, delimiter):
                     error.ErrorID,
                     error.ErrorDescription)
 
-            writer.writerow([record.ProductID, record.ProductDescription])
+            writer.writerow([record.ProductID, record.ProductIDDescription])
             sys.stdout.flush()
 
 
